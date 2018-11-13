@@ -34,8 +34,7 @@ Class RavenClient {
     [hashtable]GetBaseRequestBody([string]$message) {
 
         $eventid = (New-Guid).Guid.Replace('-', '')
-        $utcNow = (Get-Date).ToUniversalTime()
-        $iso8601 = Get-Date($utcNow) -UFormat '+%Y-%m-%dT%H:%M:%S'
+        $iso8601 = [DateTime]::UtcNow.ToString('yyyy\-MM\-ddTHH\:mm\:ss')
 
         $body = @{}
         $body['event_id'] = $eventid
