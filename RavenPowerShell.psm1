@@ -4,7 +4,6 @@ function CurrentUnixTimestamp () {
 
 
 Class RavenClient {
-
     [string]$sentryDsn
     [string]$storeUri
     [string]$sentryKey
@@ -12,11 +11,12 @@ Class RavenClient {
     [int]$projectId
     [string]$sentryAuth
     [string]$userAgent
+    [string]$environment
     # https://github.com/PowerShell/vscode-powershell/issues/66
     hidden [bool]$_getFrameVariablesIsFixed
 
 
-    RavenClient([string]$sentryDsn) {
+    RavenClient([string]$sentryDsn, [string] $environment) {
         $uri = [System.Uri]::New($sentryDsn)
         $this.sentryDsn = $sentryDsn
 
@@ -25,8 +25,9 @@ Class RavenClient {
         $this.projectId = $uri.Segments[1]
         $this.storeUri = "$($uri.Scheme)://$($uri.Host):$($uri.Port)/api/$($this.projectId)/store/"
 
-        $this.userAgent = 'PowerShellRaven/1.0'
+        $this.userAgent = 'PowerShellRaven/1.0'        
         $this.sentryAuth = "Sentry sentry_version=5,sentry_key=$($this.sentryKey),sentry_secret=$($this.sentrySecret)"
+        $this.environment = $environment
 
         $this._getFrameVariablesIsFixed = $false
     }
@@ -40,14 +41,15 @@ Class RavenClient {
         $body = @{}
         $body['event_id'] = $eventid
         $body['timestamp'] = [string]$iso8601
-        $body['logger'] = 'root'
+        $body['logger'] = 'root'        
         $body['platform'] = 'other'
         $body['sdk'] = @{
             'name' = 'PowerShellRaven'
             'version' = '1.0'
-        }
+        }                
         $body['server_name'] = [System.Net.Dns]::GetHostName()
-        $body['message'] = $message
+        $body['message'] = $message       
+        $body['environment'] = $this.environment
 
         return $body
     }
@@ -106,12 +108,12 @@ Class RavenClient {
 
     [void]CaptureMessage([string]$messageRaw, [string[]]$messageParams, [string]$messageFormatted) {
 
-        $body = $this.GetBaseRequestBody('')
+        $body = $this.GetBaseRequestBody('')        
         $body['sentry.interfaces.Message'] = @{
             'message' = $messageRaw
             'params' = $messageParams
             'formatted' = $messageFormatted
-        }
+        }        
         $this.StoreEvent($body)
     }
 
@@ -178,11 +180,11 @@ function New-RavenClient {
     param(
         # Sentry DSN
         [Parameter(Mandatory=$true)]
-        [string] $SentryDsn
+        [string] $SentryDsn,
+        [string] $Environment = "Local"
     )
     
-    return [RavenClient]::New($SentryDsn)
+    return [RavenClient]::New($SentryDsn, $Environment)
 }
-
 
 Export-ModuleMember -Function New-RavenClient
