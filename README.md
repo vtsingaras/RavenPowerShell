@@ -16,7 +16,7 @@ Usage
 ```powershell
 Import-Module RavenPowerShell
 
-$ravenClient = New-RavenClient -SentryDsn 'https://mysentrydsn'
+$ravenClient = New-RavenClient -SentryDsn 'https://mysentrydsn' [-Environment myEnvironmentName]
 
 try {
     $null[5] = 0
@@ -30,7 +30,7 @@ AND/OR
 ```powershell
 Import-Module RavenPowerShell
 
-$ravenClient = New-RavenClient -SentryDsn 'https://mysentrydsn'
+$ravenClient = New-RavenClient -SentryDsn 'https://mysentrydsn' [-Environment myEnvironmentName]
 
 trap {
     $ravenClient.CaptureException($_)
