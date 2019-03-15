@@ -60,7 +60,7 @@ Class RavenClient {
 
         $jsonBody = ConvertTo-Json $body -Depth 6
 
-        Invoke-RestMethod -Uri $this.storeUri -Method Post -Body $jsonBody -ContentType 'application/json' -Headers $headers
+        Invoke-RestMethod -Uri $this.storeUri -Method Post -Body $jsonBody -ContentType 'application/json; charset=utf-8' -Headers $headers
     }
 
     [hashtable]ParsePSCallstack([System.Management.Automation.CallStackFrame[]]$callstackFrames, [hashtable[]]$frameVariables) {
