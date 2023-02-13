@@ -1,16 +1,16 @@
-Class RavenClient {
+Class Sentry {
     hidden [string]$sentryDsn
     hidden [string]$storeUri
     hidden [string]$sentryAuth
     # https://github.com/PowerShell/vscode-powershell/issues/66
     hidden [bool]$_getFrameVariablesIsFixed
 
-    RavenClient([string]$sentryDsn) {
+    Sentry([string]$sentryDsn) {
         $uri = [System.Uri]::New($sentryDsn)
         $this.sentryDsn = $sentryDsn
 
         $sentryKey = $uri.UserInfo.Split('@')[0]
-        $userAgent = 'PowerShellRaven/1.1'
+        $userAgent = 'SentryPowershell/1.0'
         $this.sentryAuth = "Sentry sentry_version=7,sentry_key=$($sentryKey),sentry_client=$userAgent"
 
         $projectId = $uri.Segments[1]
@@ -31,8 +31,8 @@ Class RavenClient {
         $body['logger'] = 'root'
         $body['platform'] = 'other'
         $body['sdk'] = @{
-            'name' = 'PowerShellRaven'
-            'version' = '1.1'
+            'name' = 'SentryPowershell'
+            'version' = '1.0'
         }
         $body['server_name'] = [System.Net.Dns]::GetHostName()
         $body['message'] = $message
