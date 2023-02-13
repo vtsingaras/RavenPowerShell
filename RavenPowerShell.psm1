@@ -1,32 +1,20 @@
-function CurrentUnixTimestamp () {
-    return [int64](([datetime]::UtcNow)-(get-date "1/1/1970")).TotalSeconds
-}
-
-
 Class RavenClient {
-
-    [string]$sentryDsn
-    [string]$storeUri
-    [string]$sentryKey
-    [string]$sentrySecret
-    [int]$projectId
-    [string]$sentryAuth
-    [string]$userAgent
+    hidden [string]$sentryDsn
+    hidden [string]$storeUri
+    hidden [string]$sentryAuth
     # https://github.com/PowerShell/vscode-powershell/issues/66
     hidden [bool]$_getFrameVariablesIsFixed
-
 
     RavenClient([string]$sentryDsn) {
         $uri = [System.Uri]::New($sentryDsn)
         $this.sentryDsn = $sentryDsn
 
-        $this.sentryKey = $uri.UserInfo.Split(':')[0]
-        $this.sentrySecret = $uri.UserInfo.Split(':')[1]
-        $this.projectId = $uri.Segments[1]
-        $this.storeUri = "$($uri.Scheme)://$($uri.Host):$($uri.Port)/api/$($this.projectId)/store/"
+        $sentryKey = $uri.UserInfo.Split('@')[0]
+        $userAgent = 'PowerShellRaven/1.1'
+        $this.sentryAuth = "Sentry sentry_version=7,sentry_key=$($sentryKey),sentry_client=$userAgent"
 
-        $this.userAgent = 'PowerShellRaven/1.0'
-        $this.sentryAuth = "Sentry sentry_version=5,sentry_key=$($this.sentryKey),sentry_secret=$($this.sentrySecret)"
+        $projectId = $uri.Segments[1]
+        $this.storeUri = "$($uri.Scheme)://$($uri.Host):$($uri.Port)/api/$($projectId)/store/"
 
         $this._getFrameVariablesIsFixed = $false
     }
@@ -44,7 +32,7 @@ Class RavenClient {
         $body['platform'] = 'other'
         $body['sdk'] = @{
             'name' = 'PowerShellRaven'
-            'version' = '1.0'
+            'version' = '1.1'
         }
         $body['server_name'] = [System.Net.Dns]::GetHostName()
         $body['message'] = $message
@@ -52,15 +40,15 @@ Class RavenClient {
         return $body
     }
 
-    [void]StoreEvent([hashtable]$body) {
+    [string]StoreEvent([hashtable]$body) {
 
         $headers = @{}
-        $headers.Add('X-Sentry-Auth', $this.sentryAuth + ",sentry_timestamp=" + $(CurrentUnixTimestamp))
-        $headers.Add('User-Agent', $this.userAgent)
-
+        $headers.Add('X-Sentry-Auth', $this.sentryAuth)
+ 
         $jsonBody = ConvertTo-Json $body -Depth 6
 
-        Invoke-RestMethod -Uri $this.storeUri -Method Post -Body $jsonBody -ContentType 'application/json' -Headers $headers
+        $result = Invoke-RestMethod -Uri $this.storeUri -Method Post -Body $jsonBody -ContentType 'application/json' -Headers $headers
+        return $result.Id
     }
 
     [hashtable]ParsePSCallstack([System.Management.Automation.CallStackFrame[]]$callstackFrames, [hashtable[]]$frameVariables) {
@@ -115,13 +103,13 @@ Class RavenClient {
         $this.StoreEvent($body)
     }
 
-    [void]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord) {
+    [string]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord) {
         
         # skip ourselves
-        $this.CaptureException($errorRecord, 1)
+        return $this.CaptureException($errorRecord, 1)
     }
 
-    [void]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord, [int]$skipFrames) {
+    [string]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord, [int]$skipFrames) {
 
         # skip ourselves
         $callstackSkip = 1 + $skipFrames
@@ -143,14 +131,14 @@ Class RavenClient {
             }
         }
 
-        $this.CaptureException($errorRecord, $callstackFrames, $frameVariables)
+        return $this.CaptureException($errorRecord, $callstackFrames, $frameVariables)
     }
 
-    [void]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord,
+    [string]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord,
         [System.Management.Automation.CallStackFrame[]]$callstackFrames=@(), [hashtable[]]$frameVariables) {
 
         $exceptionMessage = $errorRecord.Exception.Message
-        if ($errorRecord.ErrorDetails.Message -ne $null) {
+        if ($errorRecord.ErrorDetails.Message) {
             $exceptionMessage = $errorRecord.ErrorDetails.Message
         }
         $exceptionName = $errorRecord.Exception.GetType().Name
@@ -170,19 +158,19 @@ Class RavenClient {
 
         $body['stacktrace'] = $this.ParsePSCallstack($callstackFrames, $frameVariables)
 
-        $this.StoreEvent($body)
+        return $this.StoreEvent($body)
     }
 }
 
-function New-RavenClient {
+function New-Sentry {
     param(
         # Sentry DSN
         [Parameter(Mandatory=$true)]
         [string] $SentryDsn
     )
     
-    return [RavenClient]::New($SentryDsn)
+    return [Sentry]::New($SentryDsn)
 }
 
 
-Export-ModuleMember -Function New-RavenClient
+Export-ModuleMember -Function New-Sentry
