@@ -1,33 +1,20 @@
-function CurrentUnixTimestamp () {
-    return [int64](([datetime]::UtcNow)-(get-date "1/1/1970")).TotalSeconds
-}
-
-
-Class RavenClient {
-
-    [string]$sentryDsn
-    [string]$storeUri
-    [string]$sentryKey
-    [string]$sentrySecret
-    [int]$projectId
-    [string]$sentryAuth
-    [string]$userAgent
+Class Sentry {
+    hidden [string]$storeUri
+    hidden [string]$sentryAuth
+    hidden [hashtable]$tags
     # https://github.com/PowerShell/vscode-powershell/issues/66
     hidden [bool]$_getFrameVariablesIsFixed
 
-
-    RavenClient([string]$sentryDsn) {
-        $uri = [System.Uri]::New($sentryDsn)
-        $this.sentryDsn = $sentryDsn
-
-        $this.sentryKey = $uri.UserInfo.Split(':')[0]
-        $this.sentrySecret = $uri.UserInfo.Split(':')[1]
-        $this.projectId = $uri.Segments[1]
-        $this.storeUri = "$($uri.Scheme)://$($uri.Host):$($uri.Port)/api/$($this.projectId)/store/"
-
-        $this.userAgent = 'PowerShellRaven/1.0'
-        $this.sentryAuth = "Sentry sentry_version=5,sentry_key=$($this.sentryKey),sentry_secret=$($this.sentrySecret)"
-
+    Sentry([string]$sentryDsn, [Hashtable] $tags) {
+        if ($sentryDsn) {
+            $uri = [System.Uri]::New($sentryDsn)
+            $this.tags = $tags
+            $sentryKey = $uri.UserInfo.Split('@')[0]
+            $userAgent = 'SentryPowershell/1.0'
+            $this.sentryAuth = "Sentry sentry_version=7,sentry_key=$($sentryKey),sentry_client=$userAgent"
+            $projectId = $uri.Segments[1]
+            $this.storeUri = "$($uri.Scheme)://$($uri.Host):$($uri.Port)/api/$($projectId)/store/"
+        }
         $this._getFrameVariablesIsFixed = $false
     }
 
@@ -43,30 +30,48 @@ Class RavenClient {
         $body['logger'] = 'root'
         $body['platform'] = 'other'
         $body['sdk'] = @{
-            'name' = 'PowerShellRaven'
+            'name'    = 'SentryPowershell'
             'version' = '1.0'
         }
         $body['server_name'] = [System.Net.Dns]::GetHostName()
         $body['message'] = $message
-
+        if ($this.tags) {
+            $body['tags'] = $this.tags
+        }
         return $body
     }
 
-    [void]StoreEvent([hashtable]$body) {
+    [string]StoreEvent([hashtable]$body) {
+        if ($this.storeUri) {
+            $headers = @{}
+            $headers.Add('X-Sentry-Auth', $this.sentryAuth)
+ 
+            $jsonBody = ConvertTo-Json $body -Depth 6
 
-        $headers = @{}
-        $headers.Add('X-Sentry-Auth', $this.sentryAuth + ",sentry_timestamp=" + $(CurrentUnixTimestamp))
-        $headers.Add('User-Agent', $this.userAgent)
-
-        $jsonBody = ConvertTo-Json $body -Depth 6
-
-        Invoke-RestMethod -Uri $this.storeUri -Method Post -Body $jsonBody -ContentType 'application/json' -Headers $headers
+            try {
+                $result = Invoke-RestMethod -Uri $this.storeUri -Method Post -Body $jsonBody -ContentType 'application/json' -Headers $headers
+                return $result.Id
+            }
+            catch {
+                $errorCode = $_.Exception.Response.StatusCode
+                $errorMessage = $_.ErrorDetails.Message
+                $message = "Failed to post event to Sentry server"
+                if($errorCode) {
+                    $message += " - $($errorCode.value__) ($errorCode)"
+                }
+                elseif ($errorMessage) {
+                    $message += " - $errorMessage"
+                }
+                Write-Warning $message
+            }
+        }
+        return ""
     }
 
     [hashtable]ParsePSCallstack([System.Management.Automation.CallStackFrame[]]$callstackFrames, [hashtable[]]$frameVariables) {
 
         $context_lines_count = 10
-        $stacktrace = @{
+         $thisStacktrace = @{
             'frames' = @()
         }
         $frames = @()
@@ -98,10 +103,10 @@ Class RavenClient {
 
         # [System.Array]::Reverse returns an empty array ???
         for ($i = $frames.Count - 1; $i -ge 0; $i--) {
-            $stacktrace['frames'] += $frames[$i]
+             $thisStacktrace['frames'] += $frames[$i]
         }
 
-        return $stacktrace
+        return  $thisStacktrace
     }
 
     [void]CaptureMessage([string]$messageRaw, [string[]]$messageParams, [string]$messageFormatted) {
@@ -115,13 +120,13 @@ Class RavenClient {
         $this.StoreEvent($body)
     }
 
-    [void]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord) {
+    [string]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord) {
         
         # skip ourselves
-        $this.CaptureException($errorRecord, 1)
+        return $this.CaptureException($errorRecord, 1)
     }
 
-    [void]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord, [int]$skipFrames) {
+    [string]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord, [int]$skipFrames) {
 
         # skip ourselves
         $callstackSkip = 1 + $skipFrames
@@ -143,14 +148,14 @@ Class RavenClient {
             }
         }
 
-        $this.CaptureException($errorRecord, $callstackFrames, $frameVariables)
+        return $this.CaptureException($errorRecord, $callstackFrames, $frameVariables)
     }
 
-    [void]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord,
+    [string]CaptureException([System.Management.Automation.ErrorRecord]$errorRecord,
         [System.Management.Automation.CallStackFrame[]]$callstackFrames=@(), [hashtable[]]$frameVariables) {
 
         $exceptionMessage = $errorRecord.Exception.Message
-        if ($errorRecord.ErrorDetails.Message -ne $null) {
+        if ($errorRecord.ErrorDetails.Message) {
             $exceptionMessage = $errorRecord.ErrorDetails.Message
         }
         $exceptionName = $errorRecord.Exception.GetType().Name
@@ -170,19 +175,19 @@ Class RavenClient {
 
         $body['stacktrace'] = $this.ParsePSCallstack($callstackFrames, $frameVariables)
 
-        $this.StoreEvent($body)
+        return $this.StoreEvent($body)
     }
 }
 
-function New-RavenClient {
+function New-Sentry {
     param(
         # Sentry DSN
-        [Parameter(Mandatory=$true)]
-        [string] $SentryDsn
+        [string] $SentryDsn,
+        [Hashtable] $Tags
     )
     
-    return [RavenClient]::New($SentryDsn)
+    return [Sentry]::New($SentryDsn, $Tags)
 }
 
 
-Export-ModuleMember -Function New-RavenClient
+Export-ModuleMember -Function New-Sentry

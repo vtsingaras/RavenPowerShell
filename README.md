@@ -1,39 +1,39 @@
 Overview
 --------
 
-RavenPowerShell is a PowerShell client for [sentry.io](https://sentry.io/welcome/)
+SentryPowershell is a PowerShell client for [sentry.io](https://sentry.io/welcome/)
 
 Installation
 -----
 
 ```powershell
-Install-Module RavenPowerShell
+Install-Module SentryPowershell
 ```
 
 Usage
 -----
 
 ```powershell
-Import-Module RavenPowerShell
+Import-Module SentryPowershell
 
-$ravenClient = New-RavenClient -SentryDsn 'https://mysentrydsn'
+$sentry = New-Sentry -SentryDsn 'https://mysentrydsn'
 
 try {
     $null[5] = 0
 } catch {
-    $ravenClient.CaptureException($_)
+    $sentry.CaptureException($_)
 }
 ```
 
 AND/OR
 
 ```powershell
-Import-Module RavenPowerShell
+Import-Module SentryPowershell
 
-$ravenClient = New-RavenClient -SentryDsn 'https://mysentrydsn'
+$client = New-Sentry -SentryDsn 'https://mysentrydsn'
 
 trap {
-    $ravenClient.CaptureException($_)
+    $client.CaptureException($_)
     break
 }
 
