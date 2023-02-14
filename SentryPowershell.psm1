@@ -1,21 +1,20 @@
 Class Sentry {
-    hidden [string]$sentryDsn
     hidden [string]$storeUri
     hidden [string]$sentryAuth
+    hidden [hashtable]$tags
     # https://github.com/PowerShell/vscode-powershell/issues/66
     hidden [bool]$_getFrameVariablesIsFixed
 
-    Sentry([string]$sentryDsn) {
-        $uri = [System.Uri]::New($sentryDsn)
-        $this.sentryDsn = $sentryDsn
-
-        $sentryKey = $uri.UserInfo.Split('@')[0]
-        $userAgent = 'SentryPowershell/1.0'
-        $this.sentryAuth = "Sentry sentry_version=7,sentry_key=$($sentryKey),sentry_client=$userAgent"
-
-        $projectId = $uri.Segments[1]
-        $this.storeUri = "$($uri.Scheme)://$($uri.Host):$($uri.Port)/api/$($projectId)/store/"
-
+    Sentry([string]$sentryDsn, [Hashtable] $tags) {
+        if ($sentryDsn) {
+            $uri = [System.Uri]::New($sentryDsn)
+            $this.tags = $tags
+            $sentryKey = $uri.UserInfo.Split('@')[0]
+            $userAgent = 'SentryPowershell/1.0'
+            $this.sentryAuth = "Sentry sentry_version=7,sentry_key=$($sentryKey),sentry_client=$userAgent"
+            $projectId = $uri.Segments[1]
+            $this.storeUri = "$($uri.Scheme)://$($uri.Host):$($uri.Port)/api/$($projectId)/store/"
+        }
         $this._getFrameVariablesIsFixed = $false
     }
 
@@ -31,30 +30,48 @@ Class Sentry {
         $body['logger'] = 'root'
         $body['platform'] = 'other'
         $body['sdk'] = @{
-            'name' = 'SentryPowershell'
+            'name'    = 'SentryPowershell'
             'version' = '1.0'
         }
         $body['server_name'] = [System.Net.Dns]::GetHostName()
         $body['message'] = $message
-
+        if ($this.tags) {
+            $body['tags'] = $this.tags
+        }
         return $body
     }
 
     [string]StoreEvent([hashtable]$body) {
-
-        $headers = @{}
-        $headers.Add('X-Sentry-Auth', $this.sentryAuth)
+        if ($this.storeUri) {
+            $headers = @{}
+            $headers.Add('X-Sentry-Auth', $this.sentryAuth)
  
-        $jsonBody = ConvertTo-Json $body -Depth 6
+            $jsonBody = ConvertTo-Json $body -Depth 6
 
-        $result = Invoke-RestMethod -Uri $this.storeUri -Method Post -Body $jsonBody -ContentType 'application/json' -Headers $headers
-        return $result.Id
+            try {
+                $result = Invoke-RestMethod -Uri $this.storeUri -Method Post -Body $jsonBody -ContentType 'application/json' -Headers $headers
+                return $result.Id
+            }
+            catch {
+                $errorCode = $_.Exception.Response.StatusCode
+                $errorMessage = $_.ErrorDetails.Message
+                $message = "Failed to post event to Sentry server"
+                if($errorCode) {
+                    $message += " - $($errorCode.value__) ($errorCode)"
+                }
+                elseif ($errorMessage) {
+                    $message += " - $errorMessage"
+                }
+                Write-Warning $message
+            }
+        }
+        return ""
     }
 
     [hashtable]ParsePSCallstack([System.Management.Automation.CallStackFrame[]]$callstackFrames, [hashtable[]]$frameVariables) {
 
         $context_lines_count = 10
-        $stacktrace = @{
+         $thisStacktrace = @{
             'frames' = @()
         }
         $frames = @()
@@ -86,10 +103,10 @@ Class Sentry {
 
         # [System.Array]::Reverse returns an empty array ???
         for ($i = $frames.Count - 1; $i -ge 0; $i--) {
-            $stacktrace['frames'] += $frames[$i]
+             $thisStacktrace['frames'] += $frames[$i]
         }
 
-        return $stacktrace
+        return  $thisStacktrace
     }
 
     [void]CaptureMessage([string]$messageRaw, [string[]]$messageParams, [string]$messageFormatted) {
@@ -165,11 +182,11 @@ Class Sentry {
 function New-Sentry {
     param(
         # Sentry DSN
-        [Parameter(Mandatory=$true)]
-        [string] $SentryDsn
+        [string] $SentryDsn,
+        [Hashtable] $Tags
     )
     
-    return [Sentry]::New($SentryDsn)
+    return [Sentry]::New($SentryDsn, $Tags)
 }
 
 
